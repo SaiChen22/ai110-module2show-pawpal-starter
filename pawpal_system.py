@@ -9,6 +9,69 @@ from uuid import uuid4
 import pandas as pd
 
 
+# ============================================================================
+# CUSTOM EXCEPTIONS
+# ============================================================================
+
+
+class PawPalException(Exception):
+	"""Base exception for PawPal system errors."""
+
+	pass
+
+
+class ValidationError(PawPalException):
+	"""Raised when data validation fails."""
+
+	pass
+
+
+class TimeConstraintError(ValidationError):
+	"""Raised when time-related constraints are violated."""
+
+	pass
+
+
+class DurationError(ValidationError):
+	"""Raised when duration constraints are violated."""
+
+	pass
+
+
+# ============================================================================
+# VALIDATION HELPERS
+# ============================================================================
+
+
+def _validate_time_range(start: time, end: time, field_start: str = "start_time", field_end: str = "end_time") -> None:
+	"""Validate that start_time < end_time."""
+	if start >= end:
+		raise TimeConstraintError(
+			f"Invalid time range: {field_start} ({start}) must be before {field_end} ({end})"
+		)
+
+
+def _validate_positive_duration(minutes: int, field_name: str = "duration_minutes") -> None:
+	"""Validate that duration is positive."""
+	if minutes <= 0:
+		raise DurationError(f"{field_name} must be positive, got {minutes}")
+
+
+def _validate_positive_float(value: float, field_name: str) -> None:
+	"""Validate that a float value is positive."""
+	if value <= 0:
+		raise ValidationError(f"{field_name} must be positive, got {value}")
+
+
+def _validate_owner_time_window(proposed_time: time, owner_start: time, owner_end: time, task_name: str = "Task") -> None:
+	"""Validate that proposed_time falls within owner's preferred window."""
+	if not (owner_start <= proposed_time <= owner_end):
+		raise TimeConstraintError(
+			f"{task_name} scheduled at {proposed_time} is outside owner's preferred window "
+			f"({owner_start} to {owner_end})"
+		)
+
+
 class Priority(Enum):
 	HIGH = 3
 	MEDIUM = 2
@@ -60,11 +123,18 @@ class Owner:
 
 	@classmethod
 	def from_dict(cls, data: dict[str, Any]) -> Owner:
+		available_minutes = int(data["available_minutes_per_day"])
+		preferred_start = _parse_time(data["preferred_start_time"])
+		preferred_end = _parse_time(data["preferred_end_time"])
+		
+		_validate_positive_duration(available_minutes, "available_minutes_per_day")
+		_validate_time_range(preferred_start, preferred_end, "preferred_start_time", "preferred_end_time")
+		
 		return cls(
 			name=data["name"],
-			available_minutes_per_day=int(data["available_minutes_per_day"]),
-			preferred_start_time=_parse_time(data["preferred_start_time"]),
-			preferred_end_time=_parse_time(data["preferred_end_time"]),
+			available_minutes_per_day=available_minutes,
+			preferred_start_time=preferred_start,
+			preferred_end_time=preferred_end,
 			notes=data.get("notes", ""),
 		)
 
@@ -96,12 +166,18 @@ class Pet:
 
 	@classmethod
 	def from_dict(cls, data: dict[str, Any]) -> Pet:
+		age = float(data["age_years"])
+		weight = float(data["weight_kg"])
+		
+		_validate_positive_float(age, "age_years")
+		_validate_positive_float(weight, "weight_kg")
+		
 		return cls(
 			name=data["name"],
 			species=data["species"],
 			breed=data["breed"],
-			age_years=float(data["age_years"]),
-			weight_kg=float(data["weight_kg"]),
+			age_years=age,
+			weight_kg=weight,
 			health_notes=data.get("health_notes", ""),
 		)
 
@@ -117,6 +193,8 @@ class Task:
 	preferred_time_window: tuple[time, time] | None = None
 	notes: str = ""
 	task_id: str = field(default_factory=lambda: str(uuid4()))
+	owner_id: str = field(default_factory=lambda: str(uuid4()))
+	pet_id: str = field(default_factory=lambda: str(uuid4()))
 
 	def is_schedulable_at(self, t: time) -> bool:
 		if self.preferred_time_window is None:
@@ -140,28 +218,35 @@ class Task:
 				_time_to_str(self.preferred_time_window[1]),
 			],
 			"notes": self.notes,
+			"owner_id": self.owner_id,
+			"pet_id": self.pet_id,
 		}
 
 	@classmethod
 	def from_dict(cls, data: dict[str, Any]) -> Task:
+		duration = int(data["duration_minutes"])
+		_validate_positive_duration(duration, "duration_minutes")
+		
 		preferred_time_window_data = data.get("preferred_time_window")
 		preferred_time_window: tuple[time, time] | None = None
 		if preferred_time_window_data:
-			preferred_time_window = (
-				_parse_time(preferred_time_window_data[0]),
-				_parse_time(preferred_time_window_data[1]),
-			)
+			start_time = _parse_time(preferred_time_window_data[0])
+			end_time = _parse_time(preferred_time_window_data[1])
+			_validate_time_range(start_time, end_time, "preferred_time_window[0]", "preferred_time_window[1]")
+			preferred_time_window = (start_time, end_time)
 
 		return cls(
 			task_id=data.get("task_id", str(uuid4())),
 			name=data["name"],
 			category=TaskCategory(data["category"]),
-			duration_minutes=int(data["duration_minutes"]),
+			duration_minutes=duration,
 			priority=Priority[data["priority"]],
 			is_recurring=bool(data["is_recurring"]),
 			recurrence_days=list(data.get("recurrence_days", [])),
 			preferred_time_window=preferred_time_window,
 			notes=data.get("notes", ""),
+			owner_id=data.get("owner_id", str(uuid4())),
+			pet_id=data.get("pet_id", str(uuid4())),
 		)
 
 
@@ -189,6 +274,8 @@ class DailyPlan:
 	unscheduled_tasks: list[Task] = field(default_factory=list)
 	total_minutes_scheduled: int = 0
 	warnings: list[str] = field(default_factory=list)
+	owner_id: str = ""
+	pet_id: str = ""
 
 	def add_scheduled_task(self, st: ScheduledTask) -> None:
 		self.scheduled_tasks.append(st)
@@ -208,6 +295,36 @@ class DailyPlan:
 				if task_i.overlaps_with(task_j):
 					return True
 		return False
+
+	def find_conflicts_sorted(self) -> list[tuple[ScheduledTask, ScheduledTask]]:
+		"""Find conflicting task pairs using sweep-line algorithm (O(n log n))."""
+		if len(self.scheduled_tasks) <= 1:
+			return []
+		
+		# Create events: (time, is_start, task)
+		events = []
+		for st in self.scheduled_tasks:
+			events.append((st.start_time, True, st))
+			events.append((st.end_time, False, st))
+		
+		# Sort by time, with ends before starts at same time
+		events.sort(key=lambda e: (e[0], not e[1]))
+		
+		conflicts = []
+		active_tasks = []
+		
+		for time_val, is_start, task in events:
+			if is_start:
+				# Check conflicts with all active tasks
+				for active_task in active_tasks:
+					if task.overlaps_with(active_task):
+						conflicts.append((active_task, task))
+				active_tasks.append(task)
+			else:
+				if task in active_tasks:
+					active_tasks.remove(task)
+		
+		return conflicts
 
 	def to_display_df(self) -> pd.DataFrame:
 		rows = [
