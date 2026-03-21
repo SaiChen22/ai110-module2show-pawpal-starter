@@ -987,3 +987,144 @@ def test_generate_plan_adds_warning_for_same_preferred_time_request() -> None:
 	plan = scheduler.generate_plan(date.today())
 
 	assert any("Timing conflict request at 08:00" in warning for warning in plan.warnings)
+
+
+# ============================================================================
+# RUBRIC-ALIGNED CORE BEHAVIOR TESTS
+# ============================================================================
+
+
+def test_sorting_correctness_tasks_returned_in_chronological_order() -> None:
+	"""Sorting correctness: tasks should be returned in HH:MM chronological order."""
+	from datetime import time
+	from pawpal_system import Owner, Scheduler
+
+	owner = Owner(
+		name="Quinn",
+		available_minutes_per_day=120,
+		preferred_start_time=time(7, 0),
+		preferred_end_time=time(20, 0),
+	)
+
+	pet = Pet(name="Mochi", species="dog", breed="Corgi", age_years=4.0, weight_kg=10.0)
+	owner.add_pet(pet)
+
+	pet.add_task(
+		Task(
+			name="Late Walk",
+			category=TaskCategory.WALK,
+			duration_minutes=20,
+			priority=Priority.HIGH,
+			is_recurring=True,
+			preferred_time=time(18, 45),
+		)
+	)
+	pet.add_task(
+		Task(
+			name="Morning Feed",
+			category=TaskCategory.FEED,
+			duration_minutes=10,
+			priority=Priority.HIGH,
+			is_recurring=True,
+			preferred_time=time(8, 0),
+		)
+	)
+	pet.add_task(
+		Task(
+			name="Midday Play",
+			category=TaskCategory.ENRICHMENT,
+			duration_minutes=15,
+			priority=Priority.MEDIUM,
+			is_recurring=True,
+			preferred_time=time(12, 30),
+		)
+	)
+
+	scheduler = Scheduler(owner=owner)
+	sorted_view = scheduler.sort_by_time()
+
+	assert [item["time"] for item in sorted_view] == ["08:00", "12:30", "18:45"]
+	assert [item["name"] for item in sorted_view] == ["Morning Feed", "Midday Play", "Late Walk"]
+
+
+def test_recurrence_logic_daily_completion_creates_following_day_task() -> None:
+	"""Recurrence logic: completing a daily task creates a new task on the next day."""
+	from datetime import date, time
+	from pawpal_system import Owner, Scheduler
+
+	owner = Owner(
+		name="Riley",
+		available_minutes_per_day=120,
+		preferred_start_time=time(7, 0),
+		preferred_end_time=time(20, 0),
+	)
+
+	pet = Pet(name="Nori", species="cat", breed="Tabby", age_years=2.0, weight_kg=4.0)
+	owner.add_pet(pet)
+
+	daily_task = Task(
+		name="Daily Medication",
+		category=TaskCategory.MEDICATION,
+		duration_minutes=5,
+		priority=Priority.HIGH,
+		is_recurring=True,
+		frequency="daily",
+		preferred_time=time(9, 0),
+	)
+	pet.add_task(daily_task)
+
+	scheduler = Scheduler(owner=owner)
+	completed_date = date(2026, 3, 20)
+	next_task = scheduler.mark_task_completed(daily_task.task_id, completed_date)
+
+	assert daily_task.is_completed is True
+	assert next_task is not None
+	assert next_task.name == "Daily Medication"
+	assert next_task.is_completed is False
+	assert next_task.scheduled_for == date(2026, 3, 21)
+
+
+def test_conflict_detection_scheduler_flags_duplicate_times() -> None:
+	"""Conflict detection: duplicate preferred times should generate a warning."""
+	from datetime import date, time
+	from pawpal_system import Owner, Scheduler
+
+	owner = Owner(
+		name="Sky",
+		available_minutes_per_day=120,
+		preferred_start_time=time(7, 0),
+		preferred_end_time=time(20, 0),
+	)
+
+	dog = Pet(name="Mochi", species="dog", breed="Corgi", age_years=4.0, weight_kg=10.0)
+	cat = Pet(name="Nori", species="cat", breed="Tabby", age_years=2.0, weight_kg=4.0)
+	owner.add_pet(dog)
+	owner.add_pet(cat)
+
+	dog.add_task(
+		Task(
+			name="Walk",
+			category=TaskCategory.WALK,
+			duration_minutes=30,
+			priority=Priority.HIGH,
+			is_recurring=True,
+			frequency="daily",
+			preferred_time=time(8, 0),
+		)
+	)
+	cat.add_task(
+		Task(
+			name="Feed",
+			category=TaskCategory.FEED,
+			duration_minutes=15,
+			priority=Priority.HIGH,
+			is_recurring=True,
+			frequency="daily",
+			preferred_time=time(8, 0),
+		)
+	)
+
+	scheduler = Scheduler(owner=owner)
+	plan = scheduler.generate_plan(date.today())
+
+	assert any("Timing conflict request at 08:00" in warning for warning in plan.warnings)
