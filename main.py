@@ -32,7 +32,18 @@ def build_sample_scheduler() -> Scheduler:
 	owner.add_pet(dog)
 	owner.add_pet(cat)
 
-	# At least three tasks with different preferred times.
+	# Add tasks intentionally out of chronological order to validate sorting behavior.
+	dog.add_task(
+		Task(
+			name="Evening Grooming",
+			category=TaskCategory.GROOMING,
+			duration_minutes=20,
+			priority=Priority.MEDIUM,
+			is_recurring=True,
+			frequency="daily",
+			preferred_time=time(18, 0),
+		)
+	)
 	dog.add_task(
 		Task(
 			name="Morning Walk",
@@ -47,26 +58,42 @@ def build_sample_scheduler() -> Scheduler:
 	)
 	cat.add_task(
 		Task(
+			name="Midday Play",
+			category=TaskCategory.ENRICHMENT,
+			duration_minutes=20,
+			priority=Priority.LOW,
+			is_recurring=True,
+			frequency="daily",
+			preferred_time=time(12, 0),
+		)
+	)
+	cat.add_task(
+		Task(
 			name="Breakfast Feed",
 			category=TaskCategory.FEED,
 			duration_minutes=15,
 			priority=Priority.HIGH,
 			is_recurring=True,
 			frequency="daily",
-			preferred_time=time(9, 0),
+			preferred_time=time(8, 0),
 		)
 	)
-	dog.add_task(
+	cat.add_task(
 		Task(
-			name="Evening Grooming",
-			category=TaskCategory.GROOMING,
-			duration_minutes=20,
+			name="Anytime Litter Check",
+			category=TaskCategory.OTHER,
+			duration_minutes=10,
 			priority=Priority.MEDIUM,
 			is_recurring=True,
 			frequency="daily",
-			preferred_time=time(18, 0),
 		)
 	)
+
+	# Mark one task complete so completion-status filtering can be demonstrated.
+	for task in owner.get_all_tasks():
+		if task.name == "Midday Play":
+			task.mark_complete()
+			break
 
 	return Scheduler(owner=owner)
 
@@ -115,6 +142,54 @@ def print_today_schedule(scheduler: Scheduler) -> None:
 			print(f"- {warning}")
 
 
+def print_sort_and_filter_demo(scheduler: Scheduler) -> None:
+	print()
+	print("Sort/Filter Demo")
+	print("=" * 50)
+
+	print("Tasks Sorted By Time (HH:MM)")
+	print("-" * 50)
+	for idx, row in enumerate(scheduler.sort_by_time(), start=1):
+		print(
+			f"{idx}. {row['time']} | {row['name']} "
+			f"[completed={row['is_completed']}, priority={row['priority']}]"
+		)
+
+	print()
+	print("Filtered: Completed Tasks")
+	print("-" * 50)
+	completed_tasks = scheduler.filter_tasks(is_completed=True)
+	if not completed_tasks:
+		print("(none)")
+	else:
+		for task in completed_tasks:
+			time_str = task.preferred_time.strftime("%H:%M") if task.preferred_time else "Unscheduled"
+			print(f"- {task.name} at {time_str}")
+
+	print()
+	print("Filtered: Task Name Contains 'walk'")
+	print("-" * 50)
+	name_filtered_tasks = scheduler.filter_tasks(name="walk")
+	if not name_filtered_tasks:
+		print("(none)")
+	else:
+		for task in name_filtered_tasks:
+			time_str = task.preferred_time.strftime("%H:%M") if task.preferred_time else "Unscheduled"
+			print(f"- {task.name} at {time_str} (completed={task.is_completed})")
+
+	print()
+	print("Filtered: Pet Name Contains 'mochi'")
+	print("-" * 50)
+	pet_filtered_tasks = scheduler.filter_tasks(pet_name="mochi")
+	if not pet_filtered_tasks:
+		print("(none)")
+	else:
+		for task in pet_filtered_tasks:
+			time_str = task.preferred_time.strftime("%H:%M") if task.preferred_time else "Unscheduled"
+			print(f"- {task.name} at {time_str} (pet=Mochi)")
+
+
 if __name__ == "__main__":
 	scheduler = build_sample_scheduler()
 	print_today_schedule(scheduler)
+	print_sort_and_filter_demo(scheduler)

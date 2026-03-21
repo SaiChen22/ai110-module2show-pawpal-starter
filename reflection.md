@@ -34,13 +34,15 @@ Another change was expanding conflict analysis in `DailyPlan`. The original conf
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers four main constraints: (1) owner time budget per day, (2) owner preferred start/end window, (3) task-level time preferences (exact preferred_time or preferred_time_window), and (4) task priority (HIGH, MEDIUM, LOW). It also filters by due date/recurrence and completion status so only relevant tasks are considered.
+
+I prioritized constraints in this order: validity first (time windows and non-overlap), then feasibility (daily budget), then urgency (priority), then user preference fit (preferred times). That order reflects the scenario: a usable plan must be conflict-free and realistic before it can be optimal.
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+One tradeoff is that tasks with an exact preferred_time are treated as strict requests. If that exact slot is blocked, the scheduler does not automatically relax to nearby times for that task. This keeps placement logic simple and predictable, and supports clear conflict warnings (for example, two tasks both requested at 08:00).
+
+This is reasonable for the current pet-care scenario because predictability is often more important than aggressive optimization. Owners usually care about consistent routines (medication, feeding windows), so failing fast with a warning and suggesting manual adjustment is safer than silently moving sensitive tasks.
 
 ---
 

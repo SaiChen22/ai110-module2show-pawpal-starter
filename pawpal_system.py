@@ -296,6 +296,7 @@ class Task:
 	frequency: str = "once"
 	is_completed: bool = False
 	completed_on: date | None = None
+	scheduled_for: date | None = None
 	notes: str = ""
 	task_id: str = field(default_factory=lambda: str(uuid4()))
 	owner_id: str = field(default_factory=lambda: str(uuid4()))
@@ -319,6 +320,80 @@ class Task:
 		"""Compatibility alias for mark_completed()."""
 		self.mark_completed(completed_date)
 
+	def get_next_occurrence_date(self, from_date: date | None = None) -> date | None:
+		"""Return the next due date for a recurring task.
+
+		Uses `timedelta` to compute the next date from `from_date` (or today).
+		- daily: next day
+		- weekly with recurrence_days: next listed weekday strictly after base date
+		- weekly without recurrence_days: seven days later
+
+		Returns None for non-recurring/unsupported frequencies.
+		"""
+		base_date = from_date or date.today()
+
+		if self.frequency == "daily":
+			return base_date + timedelta(days=1)
+
+		if self.frequency == "weekly":
+			if self.recurrence_days:
+				weekday_to_index = {
+					"Monday": 0,
+					"Tuesday": 1,
+					"Wednesday": 2,
+					"Thursday": 3,
+					"Friday": 4,
+					"Saturday": 5,
+					"Sunday": 6,
+				}
+				recurrence_indexes = [
+					weekday_to_index[day]
+					for day in self.recurrence_days
+					if day in weekday_to_index
+				]
+				if recurrence_indexes:
+					days_until_candidates = [
+						((target_idx - base_date.weekday()) % 7) or 7
+						for target_idx in recurrence_indexes
+					]
+					return base_date + timedelta(days=min(days_until_candidates))
+			return base_date + timedelta(days=7)
+
+		return None
+
+	def create_next_occurrence(self, completed_date: date | None = None) -> Task | None:
+		"""Create the next Task instance for recurring rollover.
+
+		The returned task copies scheduling metadata (priority, preferred times,
+		recurrence) and sets:
+		- is_completed = False
+		- completed_on = None
+		- scheduled_for = computed next date
+
+		Returns None when no next occurrence can be computed.
+		"""
+		next_date = self.get_next_occurrence_date(completed_date)
+		if next_date is None:
+			return None
+
+		return Task(
+			name=self.name,
+			category=self.category,
+			duration_minutes=self.duration_minutes,
+			priority=self.priority,
+			is_recurring=self.is_recurring,
+			recurrence_days=list(self.recurrence_days),
+			preferred_time_window=self.preferred_time_window,
+			preferred_time=self.preferred_time,
+			frequency=self.frequency,
+			is_completed=False,
+			completed_on=None,
+			scheduled_for=next_date,
+			notes=self.notes,
+			owner_id=self.owner_id,
+			pet_id=self.pet_id,
+		)
+
 	def mark_pending(self) -> None:
 		"""Mark task as not completed."""
 		self.is_completed = False
@@ -326,6 +401,9 @@ class Task:
 
 	def is_due_on(self, target_date: date) -> bool:
 		"""Check if task is due on a specific date based on frequency and recurrence."""
+		if self.scheduled_for is not None:
+			return target_date == self.scheduled_for and not self.is_completed
+
 		if self.frequency == "once":
 			return not self.is_completed
 		if self.frequency == "daily":
@@ -355,6 +433,7 @@ class Task:
 			"frequency": self.frequency,
 			"is_completed": self.is_completed,
 			"completed_on": None if self.completed_on is None else _date_to_str(self.completed_on),
+			"scheduled_for": None if self.scheduled_for is None else _date_to_str(self.scheduled_for),
 			"notes": self.notes,
 			"owner_id": self.owner_id,
 			"pet_id": self.pet_id,
@@ -383,6 +462,8 @@ class Task:
 		completed_on_data = data.get("completed_on")
 		completed_on = None if completed_on_data is None else _parse_date(completed_on_data)
 		is_completed = _parse_bool(data.get("is_completed", False))
+		scheduled_for_data = data.get("scheduled_for")
+		scheduled_for = None if scheduled_for_data is None else _parse_date(scheduled_for_data)
 
 		return cls(
 			task_id=data.get("task_id", str(uuid4())),
@@ -397,6 +478,7 @@ class Task:
 			frequency=frequency,
 			is_completed=is_completed,
 			completed_on=completed_on,
+			scheduled_for=scheduled_for,
 			notes=data.get("notes", ""),
 			owner_id=data.get("owner_id", str(uuid4())),
 			pet_id=data.get("pet_id", str(uuid4())),
@@ -536,7 +618,120 @@ class Scheduler:
 			plan.add_scheduled_task(scheduled_task)
 
 		plan.warnings.extend(self._handle_overflow(plan.unscheduled_tasks))
+		plan.warnings.extend(self._detect_lightweight_conflicts(all_tasks, plan))
 		return plan
+
+	def mark_task_completed(self, task_id: str, completed_date: date | None = None) -> Task | None:
+		"""Mark a task complete and auto-create next instance for daily/weekly tasks."""
+		for pet in self.owner.pets:
+			for task in pet.tasks:
+				if task.task_id != task_id:
+					continue
+
+				effective_completed_date = completed_date or date.today()
+				task.mark_completed(effective_completed_date)
+
+				if task.frequency not in {"daily", "weekly"}:
+					return None
+
+				next_task = task.create_next_occurrence(effective_completed_date)
+				if next_task is not None:
+					pet.add_task(next_task)
+				return next_task
+
+		return None
+
+	# ========================================================================
+	# PUBLIC CONVENIENCE METHODS FOR FILTERING & SORTING
+	# ========================================================================
+
+	def get_tasks_for_pet(self, pet_id: str) -> list[Task]:
+		"""Get all tasks for a specific pet (regardless of completion status)."""
+		return [task for task in self.owner.get_all_tasks() if task.pet_id == pet_id]
+
+	def get_pending_tasks(self, target_date: date | None = None) -> list[Task]:
+		"""Get all non-completed tasks due on target date (or today if not specified)."""
+		if target_date is None:
+			target_date = date.today()
+		return [
+			task
+			for task in self.owner.get_all_tasks()
+			if not task.is_completed and task.is_due_on(target_date)
+		]
+
+	def get_recurring_tasks(self) -> list[Task]:
+		"""Get all recurring tasks across all pets."""
+		return [task for task in self.owner.get_all_tasks() if task.is_recurring]
+
+	def get_tasks_by_category(self, category: TaskCategory) -> list[Task]:
+		"""Get all tasks of a specific category."""
+		return [task for task in self.owner.get_all_tasks() if task.category == category]
+
+	def get_high_priority_tasks(self, target_date: date | None = None) -> list[Task]:
+		"""Get all high-priority tasks due on target date."""
+		if target_date is None:
+			target_date = date.today()
+		return [
+			task
+			for task in self.get_pending_tasks(target_date)
+			if task.priority == Priority.HIGH
+		]
+
+	def sort_by_time(self, tasks: list[Task] | None = None) -> list[dict[str, Any]]:
+		"""Return tasks sorted by preferred time with HH:MM formatting.
+
+		Tasks without a preferred_time are placed at the end and labeled as "Unscheduled".
+		"""
+		tasks_to_sort = self.owner.get_all_tasks() if tasks is None else tasks
+		sorted_tasks = sorted(
+			tasks_to_sort,
+			key=lambda task: (task.preferred_time is None, task.preferred_time or time(23, 59), task.name.lower()),
+		)
+
+		return [
+			{
+				"task_id": task.task_id,
+				"name": task.name,
+				"time": task.preferred_time.strftime("%H:%M") if task.preferred_time is not None else "Unscheduled",
+				"priority": task.priority.name,
+				"is_completed": task.is_completed,
+				"pet_id": task.pet_id,
+			}
+			for task in sorted_tasks
+		]
+
+	def filter_tasks(
+		self,
+		is_completed: bool | None = None,
+		name: str | None = None,
+		pet_name: str | None = None,
+		tasks: list[Task] | None = None,
+	) -> list[Task]:
+		"""Filter tasks by completion status, task name, and/or pet name.
+
+		- is_completed: True/False to filter by status, None to ignore status.
+		- name: case-insensitive substring match on task name.
+		- pet_name: case-insensitive substring match on associated pet name.
+		"""
+		filtered = list(self.owner.get_all_tasks() if tasks is None else tasks)
+		pet_name_by_id = {pet.pet_id: pet.name for pet in self.owner.pets}
+
+		if is_completed is not None:
+			filtered = [task for task in filtered if task.is_completed == is_completed]
+
+		if name is not None and name.strip():
+			needle = name.strip().lower()
+			filtered = [task for task in filtered if needle in task.name.lower()]
+
+		if pet_name is not None and pet_name.strip():
+			pet_needle = pet_name.strip().lower()
+			filtered = [
+				task
+				for task in filtered
+				if pet_needle in pet_name_by_id.get(task.pet_id, "").lower()
+			]
+
+		return filtered
 
 	def _retrieve_owner_pet_tasks(self, target_date: date) -> list[Task]:
 		"""Retrieve relevant tasks from owner's pets, filtered by date and completion status."""
@@ -570,7 +765,69 @@ class Scheduler:
 		)
 
 	def _find_next_available_slot(self, plan: DailyPlan, task: Task) -> time | None:
-		"""Find next non-overlapping time slot for task within owner and task constraints."""
+		"""Find the earliest valid slot for a task using a linear gap scan.
+
+		Algorithm:
+		1. Resolve an effective time window from owner + task constraints.
+		2. If task has strict preferred_time, validate only that candidate.
+		3. Otherwise scan gaps between already scheduled tasks in order and place
+		   at the earliest feasible start.
+
+		This favors readability and predictable behavior while reducing repeated
+		overlap checks from candidate-based probing.
+		"""
+		effective_window = self._resolve_effective_window(task)
+		if effective_window is None:
+			return None
+		window_start, window_end = effective_window
+
+		# If a strict preferred_time exists, validate only that single candidate.
+		if task.preferred_time is not None:
+			candidate = task.preferred_time
+			if candidate < window_start or candidate > window_end:
+				return None
+			if not _slot_end_within_bounds(candidate, task.duration_minutes, window_end):
+				return None
+			if not self._check_time_window_preference(task, candidate):
+				return None
+			if not self._is_candidate_non_overlapping(plan, task, candidate):
+				return None
+			return candidate
+
+		# Otherwise, scan gaps from earliest feasible time to the end of window.
+		current_start = window_start
+		for existing in plan.scheduled_tasks:
+			# Ignore tasks fully before our current pointer.
+			if existing.end_time <= current_start:
+				continue
+
+			# No more useful gaps once we pass scheduling window.
+			if existing.start_time >= window_end:
+				break
+
+			# Try placing into the gap before this existing task.
+			if self._can_fit_in_gap(current_start, existing.start_time, task, window_end):
+				if self._check_time_window_preference(task, current_start):
+					return current_start
+
+			# Move pointer to the end of the blocking task.
+			if existing.end_time > current_start:
+				current_start = existing.end_time
+
+		# Try tail gap from last pointer to window end.
+		if self._can_fit_in_gap(current_start, window_end, task, window_end):
+			if self._check_time_window_preference(task, current_start):
+				return current_start
+
+		return None
+
+	def _resolve_effective_window(self, task: Task) -> tuple[time, time] | None:
+		"""Merge owner and task windows into one schedulable interval.
+
+		Returns:
+		- (window_start, window_end) when constraints overlap.
+		- None when there is no valid overlap.
+		"""
 		window_start = self.owner.preferred_start_time
 		window_end = self.owner.preferred_end_time
 
@@ -581,33 +838,34 @@ class Scheduler:
 
 		if window_start >= window_end:
 			return None
+		return (window_start, window_end)
 
-		candidate_starts = [window_start]
-		candidate_starts.extend(st.end_time for st in plan.scheduled_tasks)
-		if task.preferred_time is not None:
-			candidate_starts.append(task.preferred_time)
-		candidate_starts = sorted(set(candidate_starts))
+	def _can_fit_in_gap(self, start: time, gap_end: time, task: Task, window_end: time) -> bool:
+		"""Check whether task duration fits inside a candidate gap.
 
-		for candidate in candidate_starts:
-			if candidate < window_start or candidate > window_end:
-				continue
+		A task fits if its end time is within both:
+		- the current gap boundary (`gap_end`)
+		- the overall effective scheduling boundary (`window_end`)
+		"""
+		effective_bound = min(gap_end, window_end)
+		return _slot_end_within_bounds(start, task.duration_minutes, effective_bound)
 
-			if task.preferred_time is not None and candidate != task.preferred_time:
-				continue
+	def _is_candidate_non_overlapping(self, plan: DailyPlan, task: Task, candidate: time) -> bool:
+		"""Return True if candidate interval does not overlap existing schedule.
 
-			if not _slot_end_within_bounds(candidate, task.duration_minutes, window_end):
-				continue
+		Uses direct interval intersection checks against each scheduled task:
+		[candidate_start, candidate_end) intersects [existing_start, existing_end)
+		when start < other_end and other_start < end.
+		"""
+		candidate_start = datetime.combine(date.today(), candidate)
+		candidate_end = candidate_start + timedelta(minutes=task.duration_minutes)
 
-			probe = ScheduledTask(task=task, start_time=candidate, reasoning="")
-			if any(probe.overlaps_with(existing) for existing in plan.scheduled_tasks):
-				continue
-
-			if not self._check_time_window_preference(task, candidate):
-				continue
-
-			return candidate
-
-		return None
+		for existing in plan.scheduled_tasks:
+			existing_start = datetime.combine(date.today(), existing.start_time)
+			existing_end = datetime.combine(date.today(), existing.end_time)
+			if candidate_start < existing_end and existing_start < candidate_end:
+				return False
+		return True
 
 	def _check_time_window_preference(self, task: Task, proposed_time: time) -> bool:
 		"""Validate that proposed time meets both task's and owner's time constraints."""
@@ -643,4 +901,47 @@ class Scheduler:
 				f"Unable to schedule '{task.name}' for pet_id={task.pet_id}; "
 				f"insufficient time window or budget."
 			)
+		return warnings
+
+	def _detect_lightweight_conflicts(self, tasks: list[Task], plan: DailyPlan) -> list[str]:
+		"""Return non-fatal warnings for timing conflicts.
+
+		Lightweight strategy:
+		- Requested-time conflicts: multiple tasks asking for the same HH:MM slot.
+		- Scheduled overlaps: defensive pass over final schedule conflict pairs.
+
+		This method never raises and is intended for user-facing warnings so plan
+		generation can complete even when conflicts exist.
+		"""
+		warnings: list[str] = []
+		pet_name_by_id = {pet.pet_id: pet.name for pet in self.owner.pets}
+
+		# 1) Requested-time collisions before scheduling (same HH:MM across tasks).
+		requested_by_time: dict[time, list[Task]] = {}
+		for task in tasks:
+			if task.preferred_time is None:
+				continue
+			requested_by_time.setdefault(task.preferred_time, []).append(task)
+
+		for conflict_time, grouped_tasks in requested_by_time.items():
+			if len(grouped_tasks) < 2:
+				continue
+			participants = ", ".join(
+				f"{task.name} ({pet_name_by_id.get(task.pet_id, 'Unknown Pet')})"
+				for task in grouped_tasks
+			)
+			warnings.append(
+				f"Timing conflict request at {conflict_time.strftime('%H:%M')}: {participants}. "
+				"Scheduler will keep running and place tasks in next available slots."
+			)
+
+		# 2) Defensive check for overlaps in produced schedule.
+		for first, second in plan.find_conflicts_sorted():
+			first_pet = pet_name_by_id.get(first.task.pet_id, "Unknown Pet")
+			second_pet = pet_name_by_id.get(second.task.pet_id, "Unknown Pet")
+			warnings.append(
+				"Scheduled overlap detected: "
+				f"{first.task.name} ({first_pet}) and {second.task.name} ({second_pet}) overlap."
+			)
+
 		return warnings

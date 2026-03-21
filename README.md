@@ -22,6 +22,16 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+## Smarter Scheduling
+
+Recent scheduler improvements include:
+
+- Faster slot finding using a linear gap-scan approach instead of broad candidate probing.
+- Strict preferred-time handling for tasks that require exact timing.
+- Recurring task rollover: completing daily/weekly tasks automatically creates the next occurrence.
+- Lightweight conflict detection that adds warnings (same-time requests or overlaps) without crashing the app.
+- Convenience tools for sorting/filtering tasks by time, completion status, task name, and pet name.
+
 ## Getting started
 
 ### Setup
