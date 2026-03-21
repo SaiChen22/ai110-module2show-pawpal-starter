@@ -1,6 +1,6 @@
 # PawPal+ (Module 2 Project)
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+PawPal+ is a Streamlit app that helps pet owners plan daily care tasks using a rule-based scheduler.
 
 ## Scenario
 
@@ -10,7 +10,23 @@ A busy pet owner needs help staying consistent with pet care. They want an assis
 - Consider constraints (time available, priority, owner preferences)
 - Produce a daily plan and explain why it chose that plan
 
-Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
+This project includes object-oriented domain modeling, scheduling logic, recurrence handling, and a Streamlit interface for interactive planning.
+
+## Features
+
+- Priority-first scheduling: tasks are ordered by priority (HIGH -> MEDIUM -> LOW), then by preferred time and duration.
+- Chronological task view: tasks can be sorted by time (HH:MM), with unscheduled items grouped at the end.
+- Linear gap-scan slot placement: scheduler finds the earliest valid time window without brute-force probing.
+- Time-window constraint merging: owner preference windows are intersected with task windows before scheduling.
+- Conflict warnings (non-fatal): duplicate requested times and any post-schedule overlaps are surfaced as warnings.
+- Recurrence support: completing daily/weekly tasks auto-creates the next occurrence.
+- Due-date logic: one-time, daily, weekly, and occurrence-bound (`scheduled_for`) tasks are handled consistently.
+- Filter and retrieval helpers: filter by status, task name, pet name, category, and high-priority view.
+- Explainable scheduling: each scheduled task includes reasoning text for placement decisions.
+
+## 📸 Demo
+
+![PawPal+ Streamlit Demo](public/demo.png)
 
 ## What you will build
 
@@ -40,6 +56,12 @@ Recent scheduler improvements include:
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
+```
+
+### Run the app
+
+```bash
+streamlit run app.py
 ```
 
 ### Suggested workflow

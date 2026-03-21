@@ -119,17 +119,40 @@ with col_add:
         st.rerun()
 
 if pet.tasks:
-    st.write(f"### Tasks for {pet.name}:")
+    st.write(f"### Tasks for {pet.name}")
+
+    scheduler = st.session_state.scheduler
+
+    filter_col1, filter_col2 = st.columns(2)
+    with filter_col1:
+        status_filter = st.selectbox("Filter by status", ["All", "Pending", "Completed"], index=0)
+    with filter_col2:
+        name_filter = st.text_input("Filter by task name", value="", placeholder="e.g., walk")
+
+    is_completed_filter = None
+    if status_filter == "Pending":
+        is_completed_filter = False
+    elif status_filter == "Completed":
+        is_completed_filter = True
+
+    filtered_tasks = scheduler.filter_tasks(
+        is_completed=is_completed_filter,
+        name=name_filter,
+        tasks=pet.tasks,
+    )
+    sorted_tasks = scheduler.sort_by_time(filtered_tasks)
+
     task_display = [
         {
-            "Name": t.name,
-            "Category": t.category.value,
-            "Duration (min)": t.duration_minutes,
-            "Priority": t.priority.name,
-            "Preferred Time": t.preferred_time.strftime("%H:%M") if t.preferred_time else "Any",
+            "Task": item["name"],
+            "Time": item["time"],
+            "Priority": item["priority"],
+            "Status": "Completed" if item["is_completed"] else "Pending",
         }
-        for t in pet.tasks
+        for item in sorted_tasks
     ]
+
+    st.success(f"Showing {len(task_display)} sorted task(s) for {pet.name}.")
     st.table(task_display)
 else:
     st.info(f"No tasks yet for {pet.name}. Add one above!")
@@ -152,6 +175,7 @@ if st.button("🔄 Generate Schedule for Today", use_container_width=True):
         st.metric("Unscheduled", len(plan.unscheduled_tasks))
     
     if plan.scheduled_tasks:
+        st.success("Schedule generated successfully.")
         st.write("### 📋 Today's Schedule")
         schedule_data = []
         for st_item in plan.scheduled_tasks:
@@ -168,7 +192,7 @@ if st.button("🔄 Generate Schedule for Today", use_container_width=True):
                 "Duration": st_item.task.duration_minutes,
                 "Reasoning": st_item.reasoning,
             })
-        st.dataframe(schedule_data, use_container_width=True)
+        st.table(schedule_data)
     
     if plan.unscheduled_tasks:
         st.warning(f"⚠️ {len(plan.unscheduled_tasks)} task(s) could not be scheduled")
@@ -181,12 +205,14 @@ if st.button("🔄 Generate Schedule for Today", use_container_width=True):
             }
             for t in plan.unscheduled_tasks
         ]
-        st.dataframe(unscheduled_data, use_container_width=True)
+        st.table(unscheduled_data)
     
     if plan.warnings:
-        st.info(f"ℹ️ {len(plan.warnings)} warning(s)")
+        st.warning(f"Detected {len(plan.warnings)} schedule warning(s).")
         for warning in plan.warnings:
-            st.caption(f"• {warning}")
+            st.warning(warning)
+    elif plan.scheduled_tasks:
+        st.success("No timing conflicts detected for today's plan.")
     
     if not plan.scheduled_tasks and not plan.unscheduled_tasks:
         st.info("No tasks to schedule.")

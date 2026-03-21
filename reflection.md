@@ -50,13 +50,23 @@ This is reasonable for the current pet-care scenario because predictability is o
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+I used VS Code Copilot in three main ways: architecture brainstorming, targeted implementation help, and fast test expansion. The most effective features were codebase-aware chat prompts (using #codebase context), inline code completion for repetitive dataclass and test patterns, and iterative refactor suggestions for keeping method responsibilities small.
+
+The most helpful prompts were specific and constraint-driven. For example, asking Copilot to "add tests for sorting correctness, daily recurrence rollover, and duplicate-time conflict warnings" produced better results than broad prompts like "improve tests." Prompts that named expected behavior and failure conditions were consistently the highest quality.
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+One suggestion I did not accept as-is was a more aggressive "auto-relax exact preferred times" scheduling behavior (moving strict-time tasks to nearby slots automatically). I rejected that because it would blur user intent and make medication/feeding routines less predictable. Instead, I kept strict preferred-time handling and surfaced conflict warnings clearly.
+
+I evaluated AI suggestions with two checks: design clarity and test evidence. If a suggestion made responsibilities ambiguous or mixed concerns across classes, I rewrote it. If behavior changed, I required passing tests (especially for sorting, recurrence, and conflicts) before accepting the change.
+
+**c. Separate chat sessions and organization**
+
+Using separate Copilot chat sessions by phase was very helpful. I used one session for UML/design reasoning, another for core scheduler implementation, another for test coverage, and another for documentation polish. This kept context focused, reduced prompt drift, and made it easier to compare decisions without mixing unrelated threads.
+
+**d. Lead architect takeaway**
+
+My key learning was that strong AI tools do not replace architecture ownership. As the "lead architect," my job was to define constraints, choose tradeoffs, and protect system boundaries while using AI for speed. The best outcomes came when I treated Copilot as a high-velocity collaborator, but kept final responsibility for coherence, correctness, and maintainability.
 
 ---
 
@@ -64,13 +74,28 @@ This is reasonable for the current pet-care scenario because predictability is o
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+I tested the behaviors that are most likely to break user trust in a scheduler:
+
+- Task completion state transitions (`mark_complete` / `mark_completed`).
+- Sorting correctness (priority ordering and chronological ordering by preferred time).
+- Filtering behavior (by pet, completion status, task name, and pet name).
+- Recurrence logic (daily tasks due every day, weekly day-based recurrence, and rollover creation after completion).
+- Conflict logic (task overlap detection, boundary non-overlap cases, and warning generation for duplicate preferred times).
+- Convenience retrieval methods (pending tasks, recurring tasks, category and high-priority views).
+
+These tests were important because scheduling bugs are often subtle and cumulative. A small logic mistake in sorting, due-date evaluation, or overlap detection can produce plans that look plausible but are behaviorally wrong. The test suite gave fast feedback while refactoring and made it safe to evolve the scheduler without regressions.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+I am highly confident that the current scheduler works correctly for the implemented feature scope. The suite passes consistently (`29 passed`) and covers the critical execution path from task retrieval to placement, warning generation, and recurrence rollover.
+
+If I had more time, I would add edge-case tests for:
+
+- Deterministic ordering when multiple tasks tie on priority, preferred time, and duration.
+- Weekly recurrence with invalid weekday names or empty recurrence lists.
+- Date-boundary recurrence cases (end-of-month, year rollover, leap-year transitions).
+- Duplicate completion protection (ensuring repeated complete actions do not create unintended duplicate future tasks).
+- Stress/performance scenarios with many tasks across multiple pets.
 
 ---
 
@@ -78,12 +103,12 @@ This is reasonable for the current pet-care scenario because predictability is o
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The part I am most satisfied with is the separation of concerns in the final design. Domain entities (`Owner`, `Pet`, `Task`) remain focused on state and local behavior, while `Scheduler` handles orchestration. That separation made both debugging and UI integration much cleaner. I am also satisfied with how recurrence and conflict warnings were implemented in a way that is practical for real user workflows.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+With another iteration, I would redesign the scheduler around a pluggable strategy interface so different planning policies (strict routine, balanced load, urgency-first) could be swapped without changing core models. I would also add richer constraint configuration in the UI (for example, per-task flexibility level), and introduce persistent storage so plans and completion history survive app restarts.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+One important takeaway is that AI amplifies both good and bad direction. When I provided clear requirements, constraints, and acceptance tests, development accelerated without losing design quality. When prompts were vague, suggestions were less aligned. Being explicit about architecture intent was the biggest factor in getting reliable results.
