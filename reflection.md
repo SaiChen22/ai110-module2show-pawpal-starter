@@ -68,6 +68,21 @@ Using separate Copilot chat sessions by phase was very helpful. I used one sessi
 
 My key learning was that strong AI tools do not replace architecture ownership. As the "lead architect," my job was to define constraints, choose tradeoffs, and protect system boundaries while using AI for speed. The best outcomes came when I treated Copilot as a high-velocity collaborator, but kept final responsibility for coherence, correctness, and maintainability.
 
+**e. Prompt Comparison (Model Quality)**
+
+I compared responses from two model styles while implementing and refactoring the scheduler: a baseline general model and GPT-5.3-Codex in Copilot Agent Mode.
+
+GPT-5.3-Codex consistently produced the more modular and Pythonic solutions.
+
+Reasons:
+
+- Better separation of responsibilities: it more often proposed focused helper methods (for example, slot validation, conflict checks, and formatting transforms) instead of large monolithic functions.
+- More idiomatic Python structure: clearer dataclass usage, list/dict comprehensions where appropriate, and cleaner enum-driven branching.
+- Safer incremental refactors: it tended to preserve public interfaces while improving internals, which reduced regression risk.
+- Stronger test alignment: suggested changes were usually paired with behavior-specific tests, which made verification easier.
+
+The baseline model was still useful for brainstorming alternatives, but it more frequently suggested broad rewrites that mixed concerns or required extra cleanup. For this project, GPT-5.3-Codex gave higher-quality first drafts with less post-editing.
+
 ---
 
 ## 4. Testing and Verification

@@ -1,4 +1,6 @@
-from pawpal_system import Pet, Priority, Task, TaskCategory
+from datetime import time
+
+from pawpal_system import Owner, Pet, Priority, Task, TaskCategory
 
 
 def test_task_completion_marks_status_complete() -> None:
@@ -36,6 +38,43 @@ def test_add_task_to_pet_increases_task_count() -> None:
 
 	assert len(pet.tasks) == initial_count + 1
 	assert pet.tasks[-1].name == "Breakfast Feed"
+
+
+def test_owner_save_and_load_json_round_trip(tmp_path) -> None:
+	owner = Owner(
+		name="Jordan",
+		available_minutes_per_day=120,
+		preferred_start_time=time(7, 0),
+		preferred_end_time=time(20, 0),
+	)
+	pet = Pet(name="Mochi", species="dog", breed="Corgi Mix", age_years=4.0, weight_kg=11.5)
+	owner.add_pet(pet)
+	pet.add_task(
+		Task(
+			name="Morning Walk",
+			category=TaskCategory.WALK,
+			duration_minutes=30,
+			priority=Priority.HIGH,
+			is_recurring=True,
+			frequency="daily",
+		)
+	)
+
+	data_file = tmp_path / "data.json"
+	owner.save_to_json(str(data_file))
+	loaded_owner = Owner.load_from_json(str(data_file))
+
+	assert loaded_owner is not None
+	assert loaded_owner.name == "Jordan"
+	assert len(loaded_owner.pets) == 1
+	assert loaded_owner.pets[0].name == "Mochi"
+	assert len(loaded_owner.pets[0].tasks) == 1
+	assert loaded_owner.pets[0].tasks[0].name == "Morning Walk"
+
+
+def test_owner_load_json_returns_none_when_missing(tmp_path) -> None:
+	missing_file = tmp_path / "missing.json"
+	assert Owner.load_from_json(str(missing_file)) is None
 
 
 # ============================================================================
@@ -125,6 +164,50 @@ def test_sort_tasks_by_preferred_time() -> None:
 	# Earlier preferred time should come first
 	assert sorted_tasks[0].preferred_time == time(8, 0)
 	assert sorted_tasks[1].preferred_time == time(18, 0)
+
+
+def test_sort_by_priority_then_time_public_method() -> None:
+	"""Public display sort orders by priority first, then preferred time."""
+	from pawpal_system import Scheduler, Owner
+	from datetime import time
+
+	owner = Owner(
+		name="Eve",
+		available_minutes_per_day=120,
+		preferred_start_time=time(7, 0),
+		preferred_end_time=time(20, 0),
+	)
+
+	scheduler = Scheduler(owner=owner)
+
+	high_late = Task(
+		name="High Late",
+		category=TaskCategory.WALK,
+		duration_minutes=30,
+		priority=Priority.HIGH,
+		is_recurring=False,
+		preferred_time=time(18, 0),
+	)
+	high_early = Task(
+		name="High Early",
+		category=TaskCategory.FEED,
+		duration_minutes=15,
+		priority=Priority.HIGH,
+		is_recurring=False,
+		preferred_time=time(8, 0),
+	)
+	medium = Task(
+		name="Medium Task",
+		category=TaskCategory.GROOMING,
+		duration_minutes=20,
+		priority=Priority.MEDIUM,
+		is_recurring=False,
+		preferred_time=time(9, 0),
+	)
+
+	sorted_display = scheduler.sort_by_priority_then_time([medium, high_late, high_early])
+
+	assert [item["name"] for item in sorted_display] == ["High Early", "High Late", "Medium Task"]
 
 
 # ============================================================================

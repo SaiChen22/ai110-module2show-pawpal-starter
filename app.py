@@ -1,5 +1,7 @@
 from datetime import date, time
+from pathlib import Path
 
+import pandas as pd
 import streamlit as st
 
 from pawpal_system import Owner, Pet, Priority, Scheduler, Task, TaskCategory
@@ -42,17 +44,79 @@ At minimum, your system should:
 
 st.divider()
 
+DATA_FILE = Path(__file__).parent / "data.json"
+
+PRIORITY_BADGES = {
+    "HIGH": "🔴 High",
+    "MEDIUM": "🟡 Medium",
+    "LOW": "🟢 Low",
+}
+
+CATEGORY_BADGES = {
+    "walk": "🐕 Walk",
+    "feed": "🍽️ Feed",
+    "medication": "💊 Medication",
+    "grooming": "🛁 Grooming",
+    "enrichment": "🎾 Enrichment",
+    "vet": "🩺 Vet",
+    "other": "📌 Other",
+}
+
+STATUS_BADGES = {
+    True: "✅ Completed",
+    False: "🟠 Pending",
+}
+
+
+def _priority_style(value: str) -> str:
+    if value.startswith("🔴"):
+        return "background-color: #fde2e2; color: #8f1d1d; font-weight: 600;"
+    if value.startswith("🟡"):
+        return "background-color: #fff7db; color: #7a5a00; font-weight: 600;"
+    if value.startswith("🟢"):
+        return "background-color: #e5f8ea; color: #14532d; font-weight: 600;"
+    return ""
+
+
+def _status_style(value: str) -> str:
+    if value.startswith("✅"):
+        return "background-color: #e5f8ea; color: #14532d; font-weight: 600;"
+    if value.startswith("🟠"):
+        return "background-color: #fff4e5; color: #7c2d12; font-weight: 600;"
+    return ""
+
+
+def _save_state() -> None:
+    st.session_state.owner.save_to_json(str(DATA_FILE))
+
+
+def _initialize_state() -> None:
+    loaded_owner = Owner.load_from_json(str(DATA_FILE))
+
+    if loaded_owner is None:
+        loaded_owner = Owner(
+            name="Jordan",
+            available_minutes_per_day=120,
+            preferred_start_time=time(7, 0),
+            preferred_end_time=time(20, 0),
+        )
+        default_pet = Pet(name="Mochi", species="dog", breed="Corgi Mix", age_years=4.0, weight_kg=11.5)
+        loaded_owner.add_pet(default_pet)
+        loaded_owner.save_to_json(str(DATA_FILE))
+
+    st.session_state.owner = loaded_owner
+    st.session_state.pet = loaded_owner.pets[0] if loaded_owner.pets else Pet(
+        name="Mochi", species="dog", breed="Corgi Mix", age_years=4.0, weight_kg=11.5
+    )
+    if not loaded_owner.pets:
+        loaded_owner.add_pet(st.session_state.pet)
+        loaded_owner.save_to_json(str(DATA_FILE))
+
+    st.session_state.scheduler = Scheduler(owner=st.session_state.owner)
+
 # Initialize session state with Owner, Pet, and Scheduler
 if "owner" not in st.session_state:
-    st.session_state.owner = Owner(
-        name="Jordan",
-        available_minutes_per_day=120,
-        preferred_start_time=time(7, 0),
-        preferred_end_time=time(20, 0),
-    )
-    st.session_state.pet = Pet(name="Mochi", species="dog", breed="Corgi Mix", age_years=4.0, weight_kg=11.5)
-    st.session_state.owner.add_pet(st.session_state.pet)
-    st.session_state.scheduler = Scheduler(owner=st.session_state.owner)
+    _initialize_state()
 
 st.subheader("Owner & Pet Setup")
 owner = st.session_state.owner
@@ -64,12 +128,14 @@ with col1:
     if new_owner_name != owner.name:
         owner.name = new_owner_name
         st.session_state.owner = owner
+        _save_state()
 
 with col2:
     new_pet_name = st.text_input("Pet name", value=pet.name)
     if new_pet_name != pet.name:
         pet.name = new_pet_name
         st.session_state.pet = pet
+        _save_state()
 
 st.info(f"📋 {owner.name} has {len(owner.pets)} pet(s). {pet.name} has {len(pet.tasks)} task(s).")
 
@@ -115,6 +181,7 @@ with col_add:
         )
         pet.add_task(new_task)
         st.session_state.pet = pet
+        _save_state()
         st.success(f"✅ Added task '{task_name}' to {pet.name}")
         st.rerun()
 
@@ -140,20 +207,27 @@ if pet.tasks:
         name=name_filter,
         tasks=pet.tasks,
     )
-    sorted_tasks = scheduler.sort_by_time(filtered_tasks)
+    sorted_tasks = scheduler.sort_by_priority_then_time(filtered_tasks)
+    task_by_id = {task.task_id: task for task in filtered_tasks}
 
     task_display = [
         {
             "Task": item["name"],
+            "Category": CATEGORY_BADGES.get(
+                task_by_id[item["task_id"]].category.value,
+                task_by_id[item["task_id"]].category.value.title(),
+            ),
             "Time": item["time"],
-            "Priority": item["priority"],
-            "Status": "Completed" if item["is_completed"] else "Pending",
+            "Priority": PRIORITY_BADGES.get(item["priority"], item["priority"].title()),
+            "Status": STATUS_BADGES[item["is_completed"]],
         }
         for item in sorted_tasks
     ]
 
-    st.success(f"Showing {len(task_display)} sorted task(s) for {pet.name}.")
-    st.table(task_display)
+    st.success(f"Showing {len(task_display)} priority-sorted task(s) for {pet.name}.")
+    task_df = pd.DataFrame(task_display)
+    styled_task_df = task_df.style.map(_priority_style, subset=["Priority"]).map(_status_style, subset=["Status"])
+    st.dataframe(styled_task_df, use_container_width=True, hide_index=True)
 else:
     st.info(f"No tasks yet for {pet.name}. Add one above!")
 
@@ -187,25 +261,29 @@ if st.button("🔄 Generate Schedule for Today", use_container_width=True):
                 "Time": f"{st_item.start_time.strftime('%H:%M')}-{st_item.end_time.strftime('%H:%M')}",
                 "Task": st_item.task.name,
                 "Pet": pet_name,
-                "Category": st_item.task.category.value,
-                "Priority": st_item.task.priority.name,
+                "Category": CATEGORY_BADGES.get(st_item.task.category.value, st_item.task.category.value.title()),
+                "Priority": PRIORITY_BADGES.get(st_item.task.priority.name, st_item.task.priority.name.title()),
                 "Duration": st_item.task.duration_minutes,
                 "Reasoning": st_item.reasoning,
             })
-        st.table(schedule_data)
+        schedule_df = pd.DataFrame(schedule_data)
+        styled_schedule_df = schedule_df.style.map(_priority_style, subset=["Priority"])
+        st.dataframe(styled_schedule_df, use_container_width=True, hide_index=True)
     
     if plan.unscheduled_tasks:
         st.warning(f"⚠️ {len(plan.unscheduled_tasks)} task(s) could not be scheduled")
         unscheduled_data = [
             {
                 "Task": t.name,
-                "Category": t.category.value,
-                "Priority": t.priority.name,
+                "Category": CATEGORY_BADGES.get(t.category.value, t.category.value.title()),
+                "Priority": PRIORITY_BADGES.get(t.priority.name, t.priority.name.title()),
                 "Duration (min)": t.duration_minutes,
             }
             for t in plan.unscheduled_tasks
         ]
-        st.table(unscheduled_data)
+        unscheduled_df = pd.DataFrame(unscheduled_data)
+        styled_unscheduled_df = unscheduled_df.style.map(_priority_style, subset=["Priority"])
+        st.dataframe(styled_unscheduled_df, use_container_width=True, hide_index=True)
     
     if plan.warnings:
         st.warning(f"Detected {len(plan.warnings)} schedule warning(s).")

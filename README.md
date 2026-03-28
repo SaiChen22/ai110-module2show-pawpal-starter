@@ -48,6 +48,32 @@ Recent scheduler improvements include:
 - Lightweight conflict detection that adds warnings (same-time requests or overlaps) without crashing the app.
 - Convenience tools for sorting/filtering tasks by time, completion status, task name, and pet name.
 
+## How Agent Mode Was Used
+
+This project used VS Code Agent Mode as an implementation assistant, not as a code generator-only workflow.
+
+1. Requirements extraction
+- Agent Mode was prompted to map the assignment requirements into concrete methods and data-model responsibilities.
+- This produced a checklist for priority sorting, filtering, recurrence behavior, and conflict detection.
+
+2. Incremental logic implementation
+- Logic was built in small passes (sorting, then filtering, then recurrence, then conflict checks) to reduce regression risk.
+- Agent Mode helped draft and refine methods such as task retrieval, due-date checks, overlap detection, and schedule generation.
+
+3. Test-driven validation
+- After each logic pass, Agent Mode was used to add or adjust focused tests in `tests/test_pawpal.py`.
+- Failing tests were used as feedback to tighten edge-case behavior before moving to the next feature.
+
+4. Refactoring and performance improvements
+- Agent Mode was used to replace broad candidate probing with a linear gap-scan slot finder.
+- It also helped add efficient conflict utilities while keeping the public API stable.
+
+5. Documentation synchronization
+- Agent Mode was used to keep `IMPLEMENTATION_SUMMARY.md`, UML notes, and README feature descriptions aligned with the final behavior.
+- This ensured code, tests, and docs stayed consistent as logic evolved.
+
+Agent Mode accelerated iteration, but all outputs were reviewed and verified through tests before being finalized.
+
 ## Getting started
 
 ### Setup

@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from enum import Enum
+import json
+from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -174,6 +176,12 @@ class Owner:
 			"pets": [pet.to_dict() for pet in self.pets],
 		}
 
+	def save_to_json(self, file_path: str = "data.json") -> None:
+		"""Persist owner, pets, and tasks to a JSON file."""
+		path = Path(file_path)
+		path.parent.mkdir(parents=True, exist_ok=True)
+		path.write_text(json.dumps(self.to_dict(), indent=2), encoding="utf-8")
+
 	@classmethod
 	def from_dict(cls, data: dict[str, Any]) -> Owner:
 		available_minutes = int(data["available_minutes_per_day"])
@@ -201,6 +209,16 @@ class Owner:
 			owner_id=owner_id,
 			pets=pets,
 		)
+
+	@classmethod
+	def load_from_json(cls, file_path: str = "data.json") -> Owner | None:
+		"""Load owner state from a JSON file; return None if missing or empty."""
+		path = Path(file_path)
+		if not path.exists() or path.stat().st_size == 0:
+			return None
+
+		data = json.loads(path.read_text(encoding="utf-8"))
+		return cls.from_dict(data)
 
 
 @dataclass
@@ -675,6 +693,29 @@ class Scheduler:
 			task
 			for task in self.get_pending_tasks(target_date)
 			if task.priority == Priority.HIGH
+		]
+
+	def sort_by_priority_then_time(self, tasks: list[Task] | None = None) -> list[dict[str, Any]]:
+		"""Return tasks sorted by priority first, then preferred time.
+
+		Ordering:
+		- Priority: HIGH -> MEDIUM -> LOW
+		- Preferred time: earlier first
+		- Name: case-insensitive fallback for stable display
+		"""
+		tasks_to_sort = self.owner.get_all_tasks() if tasks is None else tasks
+		sorted_tasks = self._sort_tasks_by_priority(tasks_to_sort)
+
+		return [
+			{
+				"task_id": task.task_id,
+				"name": task.name,
+				"time": task.preferred_time.strftime("%H:%M") if task.preferred_time is not None else "Unscheduled",
+				"priority": task.priority.name,
+				"is_completed": task.is_completed,
+				"pet_id": task.pet_id,
+			}
+			for task in sorted_tasks
 		]
 
 	def sort_by_time(self, tasks: list[Task] | None = None) -> list[dict[str, Any]]:

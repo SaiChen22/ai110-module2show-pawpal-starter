@@ -1,0 +1,40 @@
+{
+  "owner_id": "ede01a50-4bae-4863-885e-2d357daec350",
+  "name": "Jordan",
+  "available_minutes_per_day": 120,
+  "preferred_start_time": "07:00:00",
+  "preferred_end_time": "20:00:00",
+  "notes": "",
+  "pets": [
+    {
+      "pet_id": "5b0388cb-76e9-415e-84bd-095afd6df998",
+      "owner_id": "ede01a50-4bae-4863-885e-2d357daec350",
+      "name": "Mochi",
+      "species": "dog",
+      "breed": "Corgi Mix",
+      "age_years": 4.0,
+      "weight_kg": 11.5,
+      "health_notes": "",
+      "tasks": [
+        {
+          "task_id": "c04a76df-a568-4e00-bbcb-490587186227",
+          "name": "Morning Walk",
+          "category": "walk",
+          "duration_minutes": 30,
+          "priority": "HIGH",
+          "is_recurring": true,
+          "recurrence_days": [],
+          "preferred_time": "08:00:00",
+          "preferred_time_window": null,
+          "frequency": "daily",
+          "is_completed": false,
+          "completed_on": null,
+          "scheduled_for": null,
+          "notes": "",
+          "owner_id": "ede01a50-4bae-4863-885e-2d357daec350",
+          "pet_id": "5b0388cb-76e9-415e-84bd-095afd6df998"
+        }
+      ]
+    }
+  ]
+}
